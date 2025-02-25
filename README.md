@@ -1,6 +1,14 @@
 # IMDB Movie Query System
 
-This system provides a RAG (Retrieval Augmented Generation) based query interface for IMDB movie data. It uses Qdrant for vector storage, Google's Gemini (or other LLMs) for generation, and supports both data vectorization and querying.
+This system provides a RAG (Retrieval Augmented Generation) based query interface for IMDB movie data. It uses Qdrant for vector storage, Google's Gemini (or other LLMs) for generation, and supports both data vectorization and advanced query processing with intelligent filtering.
+
+## Key Features
+
+- **Enhanced Vectorization**: All movie attributes are properly structured and indexed for efficient filtering
+- **Intelligent Query Parsing**: Automatically extracts filtering criteria from natural language queries
+- **Hybrid Search**: Combines vector similarity with metadata filtering for precise results
+- **Multiple LLM Support**: Works with Google's Gemini, OpenAI, or local Llama models
+- **Interactive Mode**: User-friendly command line interface with sample queries
 
 ## Prerequisites
 
@@ -60,9 +68,12 @@ brew install python@3.9
 
 1. **Start Qdrant using Docker**
    ```bash
-   docker run -p 6333:6333 qdrant/qdrant
+   docker run -p 6333:6333 -v $(pwd)/qdrant_data:/qdrant/storage qdrant/qdrant
    ```
-   This will start Qdrant on localhost:6333
+   This will start Qdrant on localhost:6333 and persist data to the ./qdrant_data directory
+
+   Run the following if Qdrant contatiner is already running on port 6333
+   docker stop peaceful_kare
 
 2. **Verify Qdrant is running**
    - Open a browser and visit: http://localhost:6333/dashboard
@@ -70,108 +81,40 @@ brew install python@3.9
 
 ## Data Vectorization
 
-1. **Prepare your data**
-   - Ensure your IMDB dataset (imdb_top_1000.csv) is in the project directory
-   - The CSV should contain the required columns (Series_Title, Released_Year, etc.)
+The system implements an enhanced vectorization scheme that:
 
-2. **Run vectorization**
-   Basic usage:
-   ```bash
-   python3 main.py --mode vectorize --collection imdb_movies --csv_path imdb_top_1000.csv
-   ```
-   With rate limiting controls:
-   ```bash
-   # Smaller batches with longer delays
-   python3 main.py --mode vectorize --collection imdb_movies --csv_path imdb_top_1000.csv --batch_size 5 --delay 3.0
-   
-   # Larger batches with shorter delays (if you have higher quota)
-   python3 main.py --mode vectorize --collection imdb_movies --csv_path imdb_top_1000.csv --batch_size 20 --delay 1.0
-   ```
+1. **Structures all movie attributes** in a queryable format
+2. **Creates payload indexes** for efficient filtering
+3. **Preprocesses data** for numerical comparisons
+4. **Handles missing data** gracefully
 
-   This will:
-   - Create a new collection in Qdrant
-   - Vectorize the movie data
-   - Store the vectors and metadata
-   - Handle rate limits automatically with exponential backoff
+To run the vectorization process:
 
-   Required parameters:
-   - `--mode`: Operation mode (must be 'vectorize')
-   - `--collection`: Name of the collection to create (e.g., 'imdb_movies')
+```bash
+# Basic usage
+python3 main.py --mode vectorize --collection imdb_movies --csv_path imdb_top_1000.csv
 
-   Optional parameters:
-   - `--csv_path`: Path to the IMDB dataset CSV file (default: imdb_top_1000.csv)
-   - `--batch_size`: Number of records to process in each batch (default: 10)
-   - `--delay`: Delay in seconds between batches (default: 2.0)
+# With rate limiting controls
+python3 main.py --mode vectorize --collection imdb_movies --csv_path imdb_top_1000.csv --batch_size 5 --delay 3.0 --verbose
+```
 
-Note: Make sure to use the same collection name when querying the data later.
-
-## Querying the System
-
-1. **Using Gemini (default)**
-   Single query:
-   ```bash
-   python3 main.py --mode query --collection imdb_movies --query "What are the top 3 movies directed by Christopher Nolan?"
-   ```
-   
-   Interactive mode:
-   ```bash
-   python3 main.py --mode query --collection imdb_movies
-   ```
-
-2. **Using OpenAI GPT**
-   Single query:
-   ```bash
-   python3 main.py --mode query --collection imdb_movies --llm openai --query "Which movies from 2019 had the highest meta scores?"
-   ```
-   
-   Interactive mode:
-   ```bash
-   python3 main.py --mode query --collection imdb_movies --llm openai
-   ```
-
-3. **Using local Llama**
-   Single query:
-   ```bash
-   python3 main.py --mode query --collection imdb_movies --llm llama --query "Tell me about movies starring Tom Hanks"
-   ```
-   
-   Interactive mode:
-   ```bash
-   python3 main.py --mode query --collection imdb_movies --llm llama
-   ```
-
-Required parameters:
-- `--mode`: Operation mode (query)
-- `--collection`: Name of the collection to query
-
-Optional parameters:
-- `--query`: The question to ask (if not provided, enters interactive mode)
-- `--llm`: Choice of LLM (gemini, openai, or llama)
-
-Note: The system uses Qdrant as the default vector store.
-
-## Query System Features
-
-The system provides a conversational interface with:
-
-1. **Conversation Memory**
-   - Maintains context across multiple questions
-   - References previous interactions in responses
-   - Provides more contextually relevant answers
-
-2. **RAG Implementation**
-   - Retrieves relevant movie information from the vector database
-   - Combines retrieved context with conversation history
-   - Generates accurate, contextual responses
-
-3. **Source Attribution**
-   - Every answer includes source information
-   - Lists relevant movies with their metadata
-   - Provides transparency in responses
+The vectorizer processes the following fields:
+- Movie title
+- Release year (with decade grouping)
+- Certificate/Rating
+- Runtime (converted to minutes)
+- Genre (as both text and array)
+- IMDB Rating
+- Meta Score
+- Director
+- Stars/Cast
+- Vote counts
+- Box office gross (normalized to numeric values)
+- Plot overview
 
 ## Rate Limiting and Performance
 
-The system implements several strategies to handle API rate limits:
+The system implements several strategies to handle API rate limits, which is particularly important when using cloud-based embedding services:
 
 1. **Batch Processing**
    - Data is processed in configurable batch sizes
@@ -198,46 +141,179 @@ If you encounter rate limit errors:
 - Decrease the batch size
 - Or use a combination of both
 
+Example for more conservative rate limiting:
+```bash
+python3 main.py --mode vectorize --collection imdb_movies --csv_path imdb_top_1000.csv --batch_size 5 --delay 5.0
+```
+
+## Advanced Query Processing
+
+The system can handle complex natural language queries by:
+
+1. **Parsing filtering criteria** from natural language
+2. **Building optimized filters** for the vector database
+3. **Combining vector similarity with metadata filtering**
+4. **Re-ranking results** based on query intent
+
+Example queries that demonstrate these capabilities:
+
+1. **Simple factual questions**
+   - "When did The Matrix release?"
+   - "Who directed Inception?"
+
+2. **Filtering by attributes**
+   - "What are the top 5 movies of 2019 by meta score?"
+   - "Top horror movies with a meta score above 85 and IMDB rating above 8"
+
+3. **Time period queries**
+   - "Top 7 comedy movies between 2010-2020 by IMDB rating"
+   - "Best sci-fi movies from the 1990s"
+
+4. **Complex analytical queries**
+   - "Top directors and their highest grossing movies with gross earnings of greater than 500M at least twice"
+   - "Top 10 movies with over 1M votes but lower gross earnings"
+
+5. **Content analysis questions**
+   - "List of movies from the comedy genre where there is death or dead people involved"
+   - "Summarize the movie plots of Steven Spielberg's top-rated sci-fi movies"
+
+## Running Queries
+
+```bash
+# Interactive mode (recommended)
+python3 main.py --mode query --collection imdb_movies --llm gemini
+
+# Single query mode
+python3 main.py --mode query --collection imdb_movies --llm gemini --query "What are the top 5 movies of 2019 by meta score?"
+
+# With verbose logging
+python3 main.py --mode query --collection imdb_movies --llm gemini --verbose
+```
+
+## How the Query Engine Works
+
+1. **Query Parsing**: The system analyzes natural language queries to extract:
+   - Year ranges (e.g., "between 2010 and 2020")
+   - Rating thresholds (e.g., "rating above 8.5")
+   - Meta score ranges (e.g., "meta score above 85")
+   - Genres (e.g., "horror movies", "comedy films")
+   - Directors (e.g., "directed by Spielberg")
+   - Actors (e.g., "starring Tom Hanks")
+   - Vote thresholds (e.g., "over 1M votes")
+   - Gross earnings thresholds (e.g., "earnings above 500M")
+   - Top N requests (e.g., "top 5 movies")
+
+2. **Filter Construction**: Converts parsed criteria into optimized Qdrant filters
+
+3. **Hybrid Search**:
+   - Uses vector similarity for semantic relevance
+   - Applies metadata filters for precise attribute matching
+   - Re-ranks results based on query intent
+
+4. **Context Preparation**:
+   - Formats filtered results into structured context
+   - Highlights relevant attributes based on query type
+
+5. **LLM Integration**:
+   - Sends prepared context to the chosen LLM
+   - Generates comprehensive answers based on filtered data
+
+## Additional Options and Features
+
+### Supported LLMs
+
+1. **Google Gemini** (default)
+   ```bash
+   python3 main.py --mode query --collection imdb_movies --llm gemini
+   ```
+
+2. **OpenAI GPT**
+   ```bash
+   python3 main.py --mode query --collection imdb_movies --llm openai
+   ```
+
+3. **Local Llama**
+   ```bash
+   python3 main.py --mode query --collection imdb_movies --llm llama
+   ```
+
+### Interactive Mode Commands
+
+When in interactive mode:
+- Type `exit` to quit
+- Type `examples` to show sample queries
+
+## Troubleshooting
+
+1. **Environment Variables**
+   - Ensure GOOGLE_API_KEY is set
+   - For OpenAI, ensure OPENAI_API_KEY is set
+
+2. **Docker Issues**
+   - Ensure Docker is running before starting Qdrant
+   - Check Qdrant logs with `docker logs <container_id>`
+
+3. **Rate Limiting**
+   - If hitting API rate limits, increase the delay between batches
+   - For vectorization, use smaller batch sizes (e.g., --batch_size 5)
+   - See the "Rate Limiting and Performance" section for more details
+
+4. **Memory Issues**
+   - Reduce batch size if running out of memory
+   - Ensure at least 4GB of RAM is available
+
+5. **Query Problems**
+   - If filters aren't being detected, try rephrasing the query
+   - Use more specific language for filters (e.g., "rating above 8" instead of "good rating")
+
 ## Example Queries
 
 Once in the interactive query mode, you can try:
 
-1. Single Questions:
+1. **Single Questions**:
    - "What are the top 3 movies directed by Christopher Nolan?"
    - "Which movies from 2019 had the highest meta scores?"
    - "Tell me about movies starring Tom Hanks with an IMDB rating above 8.5"
 
-2. Conversational Follow-ups:
+2. **Conversational Follow-ups**:
    - "Which one had the highest box office earnings?"
    - "Tell me more about its plot"
    - "How does it compare to his other movies?"
    - "Which actors appeared in multiple of these films?"
 
-The system will maintain context between questions while providing sourced information
-for each response.
-
 Type 'exit' to quit the query mode.
 
-## Project Structure 
+## Project Structure
 
 - `main.py`: Entry point for running the system
-- `query_engine.py`: Core logic for querying the system
+- `data_vectorizer.py`: Enhanced vectorization with payload indexing
+- `query_engine.py`: Advanced query parsing and filtering
 - `requirements.txt`: List of dependencies
-- `README.md`: This file
+- `README.md`: Documentation (this file)
+- `.gitignore`: Prevents virtual environments from being uploaded
 
-## Troubleshooting
+## Advanced Customization
 
-1. **No Results or Empty Responses**
-   - Ensure the vector database is properly initialized
-   - Check if your query is clear and specific
-   - Try rephrasing your question
+### Custom Vectorization Schema
 
-2. **Error Messages**
-   - "Document validation error": This is handled internally, but you might see fewer sources
-   - "Connection error": Check if Qdrant is running
-   - "API error": Verify your API keys and quotas
+You can modify the vectorization schema in `data_vectorizer.py` by:
+1. Adding new fields to the `_create_payload_indexes` method
+2. Extending the preprocessing in `vectorize_and_upload`
+3. Modifying the payload structure in the point creation
 
-3. **Quality of Responses**
-   - Be specific in your questions
-   - Use follow-up questions for clarification
-   - Check the sources provided for verification
+### Custom Query Parsing
+
+To extend the query parsing capabilities in `query_engine.py`:
+1. Add new extraction methods to the `QueryParser` class
+2. Update the `parse_query` method to use new extractors
+3. Extend the `_build_filter` method to support new filter types
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- This project utilizes the IMDB Top 1000 Movies dataset
+- Built with LangChain, Qdrant, and Google Generative AI
+- Special thanks to the open-source AI and vectorstore communities

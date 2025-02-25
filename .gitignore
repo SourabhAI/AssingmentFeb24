@@ -46,6 +46,11 @@ coverage.xml
 
 # Project specific
 *.log
-*.csv
-*.db
-*.sqlite3 
+.env
+.secrets
+
+# Keep data files in repository
+# !imdb_top_1000.csv
+
+# Vector database files
+qdrant_data/ 
