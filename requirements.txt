@@ -23,4 +23,5 @@ certifi>=2023.7.22
 langchain-community>=0.0.24
 regex>=2023.6.3
 colorama>=0.4.6  # For Windows terminal colors
-rich>=13.0.0  # For improved terminal output 
+rich>=13.0.0  # For improved terminal output
+streamlit>=1.32.0  # For web-based chat UI 

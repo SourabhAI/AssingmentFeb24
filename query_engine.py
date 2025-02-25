@@ -13,7 +13,7 @@ from qdrant_client.models import Filter, FieldCondition, Range, MatchValue, Matc
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 class LLMFactory:
-    """Factory class to create different LLM instances"""
+    """Our handy factory that spins up different AI models based on what you need"""
     
     @staticmethod
     def create_llm(llm_type: str = "gemini", **kwargs):
@@ -43,12 +43,12 @@ class LLMFactory:
             raise ValueError(f"Unsupported LLM type: {llm_type}")
 
 class QueryParser:
-    """Parser for extracting filtering criteria from natural language queries"""
+    """The brain behind figuring out what you're really asking for in natural language"""
 
     @staticmethod
     def extract_year_range(query: str) -> Optional[Tuple[int, int]]:
-        """Extract year range from query text (e.g., 'between 2010 and 2020', 'from 2010 to 2020', '2010-2020')"""
-        # Pattern matching for various year range formats
+        """Pulls out year ranges from text - like when someone asks for movies 'between 2010 and 2020'"""
+        # Let's catch all the ways people might specify years
         patterns = [
             r'(?:between|from)?\s*(\d{4})\s*(?:[-–—]|to|and)\s*(\d{4})',  # 2010-2020, from 2010 to 2020, between 2010 and 2020
             r'(?:in|from|since)\s*(\d{4})\s*(?:to present|until now|to today)'  # from 2010 to present
@@ -69,7 +69,7 @@ class QueryParser:
                 except (ValueError, IndexError):
                     continue
         
-        # Look for a single year - expanded to catch more patterns including "of 2019"
+        # Just a single year? That works too - like "movies of 2019"
         year_match = re.search(r'(?:in|from|of|year|during|released?(?:\sin)?)\s*(\d{4})', query, re.IGNORECASE)
         if year_match:
             try:
@@ -78,7 +78,7 @@ class QueryParser:
             except (ValueError, IndexError):
                 pass
         
-        # Direct check for 4-digit years in the query as a fallback
+        # Last resort - just grab any 4-digit years in the right range
         year_digits = re.findall(r'\b(19\d{2}|20\d{2})\b', query)
         if year_digits:
             try:
@@ -91,25 +91,26 @@ class QueryParser:
 
     @staticmethod
     def extract_multiplicity(query: str) -> Optional[int]:
-        """Extract multiplicity requirements like 'at least twice', 'more than 3 times', etc."""
+        """Figures out how many times something needs to happen - like 'at least twice' or 'more than 3 times'"""
         patterns = [
             r'at least (\d+) times?',
             r'at least (\w+) times?',
             r'more than (\d+) times?',
             r'more than (\w+) times?',
             r'(\d+)\+ times?',
-            # Add patterns that handle specific contexts like "at least twice" at the end of a phrase
+            # Some people phrase things differently
             r'(?:with|having|earning).*?at least (\w+)',
             r'(?:with|having|earning).*?at least (\d+)',
             r'greater than .*? at least (\w+)',
             r'greater than .*? at least (\d+)',
             r'more than .*? at least (\w+)',
             r'more than .*? at least (\d+)',
-            # Specific patterns for phrases like "earnings of greater than 500M at least twice"
+            # For fancy queries like "earnings of greater than 500M at least twice"
             r'(?:gross|earnings|box office|revenue).*?greater than.*?at least (\w+)',
             r'(?:gross|earnings|box office|revenue).*?greater than.*?at least (\d+)'
         ]
         
+        # Let's translate words to numbers for the word nerds out there
         word_to_number = {
             'once': 1, 'twice': 2, 'thrice': 3,
             'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
@@ -128,7 +129,7 @@ class QueryParser:
                 except (ValueError, IndexError):
                     continue
         
-        # Special case for "twice" without "at least"
+        # Special case for just saying "twice" without the "at least" part
         if re.search(r'\btwice\b', query, re.IGNORECASE):
             return 2
             
@@ -136,13 +137,13 @@ class QueryParser:
 
     @staticmethod
     def is_director_analysis_query(query: str) -> bool:
-        """Detect queries that require analysis of directors and their movies"""
+        """Checks if you're asking about directors and their work - like 'top directors with highest grossing films'"""
         patterns = [
             r'(?:top|best) directors',
             r'directors with',
             r'directors who',
             r'directors and their',
-            # Add specific pattern for our example query
+            # Extra patterns for director queries
             r'directors.*?(?:highest|best|top).*?(?:gross|earning)',
             r'(?:top|best).*?directors.*?(?:movies|films)',
             r'(?:top|best).*?directors.*?(?:gross|earning|revenue|box office)',
@@ -156,13 +157,13 @@ class QueryParser:
 
     @staticmethod
     def extract_rating_range(query: str) -> Optional[Tuple[float, float]]:
-        """Extract IMDB rating range from query text (e.g., 'rating above 8.5', 'rating between 7 and 9')"""
-        # Pattern for rating above/below threshold
+        """Picks up IMDB rating thresholds - stuff like 'rating above 8.5' or 'rating between 7 and 9'"""
+        # Different ways people ask about ratings
         above_pattern = r'rating\s+(?:above|greater than|higher than|more than|>\s*|≥\s*|>=\s*)(\d+\.?\d*)'
         below_pattern = r'rating\s+(?:below|less than|lower than|<\s*|≤\s*|<=\s*)(\d+\.?\d*)'
         between_pattern = r'rating\s+(?:between|from)\s+(\d+\.?\d*)\s+(?:and|to)\s+(\d+\.?\d*)'
         
-        # Check for "between" pattern first
+        # First, let's check for rating ranges
         between_match = re.search(between_pattern, query, re.IGNORECASE)
         if between_match:
             try:
@@ -172,7 +173,7 @@ class QueryParser:
             except (ValueError, IndexError):
                 pass
         
-        # Check for above/below patterns
+        # Now check for minimums and maximums
         above_match = re.search(above_pattern, query, re.IGNORECASE)
         below_match = re.search(below_pattern, query, re.IGNORECASE)
         
@@ -198,13 +199,13 @@ class QueryParser:
 
     @staticmethod
     def extract_meta_score_range(query: str) -> Optional[Tuple[int, int]]:
-        """Extract meta score range from query text (e.g., 'meta score above 85', 'meta score between 70 and 90')"""
-        # Pattern for meta score above/below threshold
+        """Spots Metacritic score mentions - like 'meta score above 85' or 'meta score between 70 and 90'"""
+        # Ways people might phrase meta score queries
         above_pattern = r'meta\s*(?:score|critic)?\s+(?:above|greater than|higher than|more than|>\s*|≥\s*|>=\s*)(\d+)'
         below_pattern = r'meta\s*(?:score|critic)?\s+(?:below|less than|lower than|<\s*|≤\s*|<=\s*)(\d+)'
         between_pattern = r'meta\s*(?:score|critic)?\s+(?:between|from)\s+(\d+)\s+(?:and|to)\s+(\d+)'
         
-        # Check for "between" pattern first
+        # First check for ranges
         between_match = re.search(between_pattern, query, re.IGNORECASE)
         if between_match:
             try:
@@ -214,7 +215,7 @@ class QueryParser:
             except (ValueError, IndexError):
                 pass
         
-        # Check for above/below patterns
+        # Then check for thresholds
         above_match = re.search(above_pattern, query, re.IGNORECASE)
         below_match = re.search(below_pattern, query, re.IGNORECASE)
         
@@ -240,8 +241,8 @@ class QueryParser:
 
     @staticmethod
     def extract_genres(query: str) -> List[str]:
-        """Extract genre information from query text"""
-        # Common movie genres
+        """Picks out movie genres you're interested in - like horror, comedy, sci-fi, etc."""
+        # The usual suspects when it comes to movie genres
         known_genres = [
             "Action", "Adventure", "Animation", "Biography", "Comedy", 
             "Crime", "Documentary", "Drama", "Family", "Fantasy", 
@@ -299,8 +300,8 @@ class QueryParser:
 
     @staticmethod
     def extract_votes_threshold(query: str) -> Optional[int]:
-        """Extract vote count threshold from query text (e.g., 'over 1M votes', 'more than 500000 votes')"""
-        # Pattern for votes above threshold
+        """Catches when someone's asking about movies with a ton of votes - like 'over 1M votes'"""
+        # Looking for patterns where people mention vote counts
         vote_patterns = [
             r'(?:with|having|over|more than)\s+(\d+)([Kk]|[Mm])?\s+votes',
             r'(?:votes|vote count)\s+(?:above|greater than|more than|>\s*|≥\s*|>=\s*)(\d+)([Kk]|[Mm])?'
@@ -328,8 +329,8 @@ class QueryParser:
 
     @staticmethod
     def extract_gross_threshold(query: str) -> Optional[float]:
-        """Extract gross earnings threshold from query text (e.g., 'over $500M', 'earnings above 100 million')"""
-        # Pattern for gross above threshold
+        """Figures out if you're looking for blockbusters - like 'movies earning over $500M'"""
+        # Money talks - patterns for box office mentions
         gross_patterns = [
             r'(?:gross|earnings|box office|revenue)\s+(?:above|greater than|more than|>\s*|≥\s*|>=\s*)\s*\$?\s*(\d+(?:\.\d+)?)\s*([Kk]|[Mm]|[Bb]|million|billion)?',
             r'(?:gross|earnings|box office|revenue)\s+(?:of|over|exceeding)\s+\$?\s*(\d+(?:\.\d+)?)\s*([Kk]|[Mm]|[Bb]|million|billion)?'
@@ -358,7 +359,7 @@ class QueryParser:
 
     @staticmethod
     def extract_top_n(query: str) -> Optional[int]:
-        """Extract 'top N' from query (e.g., 'top 5 movies', 'top 10 highest rated')"""
+        """Spots when you're asking for a ranked list - like 'top 5 movies' or 'top 10 highest rated'"""
         pattern = r'top\s+(\d+)'
         match = re.search(pattern, query, re.IGNORECASE)
         
@@ -372,59 +373,59 @@ class QueryParser:
 
     @staticmethod
     def parse_query(query: str) -> Dict[str, Any]:
-        """Parse a natural language query to extract filtering criteria"""
+        """Takes your natural question and figures out all the filtering magic needed"""
         filters = {}
         
-        # Extract year range
+        # Grab the time period you're interested in
         year_range = QueryParser.extract_year_range(query)
         if year_range:
             filters['year_range'] = year_range
         
-        # Extract rating range
+        # Looking for quality filters by IMDB rating?
         rating_range = QueryParser.extract_rating_range(query)
         if rating_range:
             filters['rating_range'] = rating_range
         
-        # Extract meta score range
+        # Or maybe you care about what the critics think (Metacritic)
         meta_score_range = QueryParser.extract_meta_score_range(query)
         if meta_score_range:
             filters['meta_score_range'] = meta_score_range
         
-        # Extract genres
+        # Pull out any genre preferences
         genres = QueryParser.extract_genres(query)
         if genres:
             filters['genres'] = genres
         
-        # Extract directors
+        # Interested in specific directors?
         directors = QueryParser.extract_directors(query)
         if directors:
             filters['directors'] = directors
         
-        # Extract actors
+        # Or maybe certain actors?
         actors = QueryParser.extract_actors(query)
         if actors:
             filters['actors'] = actors
         
-        # Extract votes threshold
+        # Looking for popular movies with lots of votes?
         votes_threshold = QueryParser.extract_votes_threshold(query)
         if votes_threshold:
             filters['votes_min'] = votes_threshold
         
-        # Extract gross threshold
+        # Or perhaps box office hits?
         gross_threshold = QueryParser.extract_gross_threshold(query)
         if gross_threshold:
             filters['gross_min'] = gross_threshold
         
-        # Extract multiplicity requirements
+        # Check if we need to count occurrences (like "at least twice")
         multiplicity = QueryParser.extract_multiplicity(query)
         if multiplicity:
             filters['multiplicity'] = multiplicity
             
-        # Detect special query types
+        # Is this a special kind of analysis about directors?
         if QueryParser.is_director_analysis_query(query):
             filters['query_type'] = 'director_analysis'
         
-        # Extract top N
+        # How many results do you want?
         top_n = QueryParser.extract_top_n(query)
         if top_n:
             filters['top_n'] = top_n
@@ -433,8 +434,8 @@ class QueryParser:
 
     @staticmethod
     def _extract_movie_title(query: str) -> Optional[str]:
-        """Extract potential movie title from a query."""
-        # Pattern for movie titles in various question formats
+        """Tries to figure out if you're asking about a specific movie"""
+        # We look for movie titles in all sorts of question formats
         patterns = [
             # "When did {Movie} release?"
             r"when did (?:the\s+)?([A-Z][a-zA-Z0-9\s']+?)(?:\s+release|\s+come out|\s+debut)",
@@ -458,14 +459,14 @@ class QueryParser:
             match = re.search(pattern, query, re.IGNORECASE)
             if match:
                 title = match.group(1).strip()
-                # Check if it looks like a title (avoid extracting general phrases)
+                # Let's make sure it's not just a random phrase
                 if len(title.split()) <= 6 and not title.lower() in ["the movie", "the film", "it", "that"]:
                     return title
         
         return None
 
 class IMDBQueryEngine:
-    """Advanced query engine for IMDB movie data with filtering capabilities"""
+    """Your movie database expert - gives you answers about films with smart filtering"""
     
     def __init__(
         self,
@@ -473,7 +474,7 @@ class IMDBQueryEngine:
         llm_type: str = "gemini",
         **llm_kwargs
     ):
-        # Initialize vector store
+        # Fire up the vector database connection
         self.qdrant_client = QdrantClient("localhost", port=6333)
         self.embeddings = GoogleGenerativeAIEmbeddings(
             model="models/embedding-001",
@@ -483,15 +484,15 @@ class IMDBQueryEngine:
             client=self.qdrant_client,
             collection_name=collection_name,
             embeddings=self.embeddings,
-            content_payload_key="full_text",  # Use full_text field as document content
-            metadata_payload_key="metadata"   # Use metadata field for document metadata
+            content_payload_key="full_text",  # Where the movie info lives
+            metadata_payload_key="metadata"   # All the extra details we can filter on
         )
         
-        # Initialize LLM and chain
+        # Get our AI brain ready
         self.llm = LLMFactory.create_llm(llm_type, **llm_kwargs)
         self.qa_chain = self._create_qa_chain()
         
-        # Initialize query parser
+        # Set up our query understanding system
         self.parser = QueryParser()
         
     def _create_qa_chain(self) -> RetrievalQA:

@@ -13,7 +13,7 @@ from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, Fi
 from langchain_community.vectorstores import Qdrant
 
 class RateLimitError(Exception):
-    """Custom exception for rate limit errors"""
+    """We hit Google's API rate limits - need to slow down"""
     pass
 
 @retry(
@@ -22,7 +22,7 @@ class RateLimitError(Exception):
     retry_error_callback=lambda retry_state: retry_state.outcome.result()
 )
 def create_embedding_with_retry(embeddings, text):
-    """Create embedding with retry logic"""
+    """Try to create an embedding, and if we get rate-limited, back off and try again"""
     try:
         return embeddings.embed_query(text)
     except Exception as e:
@@ -36,10 +36,10 @@ class IMDBDataVectorizer:
         self,
         collection_name: str = "imdb_movies",
         embedding_model: str = "models/embedding-001",
-        batch_size: int = 10,  # Reduced batch size
-        delay_between_batches: float = 2.0  # Delay in seconds
+        batch_size: int = 10,  # Smaller batches to be nice to the API
+        delay_between_batches: float = 2.0  # Take a breather between batches
     ):
-        # Initialize embedding model
+        # Fire up our embedding model
         self.embeddings = GoogleGenerativeAIEmbeddings(
             model=embedding_model,
             google_api_key=os.getenv("GOOGLE_API_KEY", ""),
@@ -51,44 +51,44 @@ class IMDBDataVectorizer:
         self.qdrant_client = QdrantClient("localhost", port=6333)
         self.collection_name = collection_name
         
-        # Get embedding dimension from the model
+        # Let's check what size vectors we're dealing with
         sample_text = "Sample text for dimension check"
         sample_embedding = self.embeddings.embed_query(sample_text)
         self.embedding_dim = len(sample_embedding)
 
     def create_collection(self):
-        """Create a new collection in Qdrant with advanced payload schema for filtering"""
+        """Set up a fresh collection in Qdrant with all the fancy indexes we need for filtering"""
         try:
-            # Check if collection exists
+            # Check if we already have this collection
             collections = self.qdrant_client.get_collections()
             if self.collection_name in [c.name for c in collections.collections]:
-                print(f"Collection '{self.collection_name}' exists. Recreating...")
+                print(f"Collection '{self.collection_name}' already exists. Let's start fresh...")
                 self.qdrant_client.delete_collection(self.collection_name)
 
-            # Create collection with vector params
+            # Create our vector collection with the right parameters
             self.qdrant_client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(
                     size=self.embedding_dim,
                     distance=Distance.COSINE
                 ),
-                # Define payload schema for efficient filtering
+                # Setting up for super fast filtering
                 optimizers_config=models.OptimizersConfigDiff(
-                    indexing_threshold=0  # Index all vectors immediately
+                    indexing_threshold=0  # Index everything right away
                 )
             )
             
-            # Create payload indexes for efficient filtering
+            # Add our special indexes for lightning-fast filtering
             self._create_payload_indexes()
             
-            print(f"Collection '{self.collection_name}' created successfully with payload indexes")
+            print(f"Collection '{self.collection_name}' is ready to go with all our custom indexes!")
         except Exception as e:
-            print(f"Error creating collection: {e}")
+            print(f"Uh oh, something went wrong creating the collection: {e}")
             raise
 
     def _create_payload_indexes(self):
-        """Create payload indexes for efficient filtering"""
-        # Index fields for filtering
+        """Set up all the special indexes that make our filtering magic work"""
+        # All the fields we want to filter on
         indexes = [
             ("year", "metadata.year", "integer"),
             ("rating", "metadata.rating", "float"),
@@ -119,12 +119,12 @@ class IMDBDataVectorizer:
                         field_name=path,
                         field_schema=schema_type
                     )
-                    print(f"Created index for {path}")
+                    print(f"✓ Added index for {path}")
                 except Exception as e:
-                    print(f"Error creating index for {path}: {e}")
+                    print(f"Couldn't create index for {path}: {e}")
 
     def _parse_runtime(self, runtime_str: str) -> int:
-        """Parse runtime string (e.g., '142 min') to minutes (integer)"""
+        """Turn movie lengths like '142 min' into just the number of minutes"""
         if pd.isna(runtime_str) or not runtime_str:
             return 0
         
@@ -134,14 +134,14 @@ class IMDBDataVectorizer:
         return 0
 
     def _parse_gross(self, gross_str: Union[str, float, int]) -> float:
-        """Parse gross string to numeric value"""
+        """Clean up box office numbers so we can actually compare them"""
         if pd.isna(gross_str) or not gross_str:
             return 0.0
         
         if isinstance(gross_str, (int, float)):
             return float(gross_str)
             
-        # Remove non-numeric characters except decimal point
+        # Strip out dollar signs, commas, etc.
         gross_str = str(gross_str)
         gross_str = re.sub(r'[^\d.]', '', gross_str)
         
@@ -151,7 +151,7 @@ class IMDBDataVectorizer:
             return 0.0
 
     def _get_decade(self, year: Union[str, int]) -> int:
-        """Get decade from year (e.g., 1995 -> 1990)"""
+        """Figure out which decade a movie belongs to (e.g., 1995 → 1990s)"""
         if pd.isna(year) or not year:
             return 0
             
@@ -162,13 +162,13 @@ class IMDBDataVectorizer:
             return 0
 
     def _split_genres(self, genre_str: str) -> List[str]:
-        """Split genre string into list of individual genres"""
+        """Break up genre strings like 'Action, Adventure, Sci-Fi' into individual genres"""
         if pd.isna(genre_str) or not genre_str:
             return []
             
-        # Split by comma and remove whitespace
+        # Split by comma and clean up
         genres = [g.strip() for g in str(genre_str).split(',')]
-        return [g for g in genres if g]  # Filter out empty strings
+        return [g for g in genres if g]  # Get rid of any empty ones
 
     def _split_stars(self, movie: Dict) -> List[str]:
         """Extract all stars from movie data"""
